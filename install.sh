@@ -84,11 +84,17 @@ info "Installing ${PLUGIN_NAME} plugin..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 mkdir -p "${PLUGIN_DIR}"
-cp -r "${SCRIPT_DIR}/plugin.yaml" "${SCRIPT_DIR}/__init__.py" "${PLUGIN_DIR}/" 2>/dev/null || {
-    err "Failed to copy plugin files. Make sure you're running install.sh from the repo root."
-    exit 1
-}
-ok "Plugin installed to ${PLUGIN_DIR}"
+
+# Skip copy if script is already inside the plugin dir
+if [[ "${SCRIPT_DIR}" == "${PLUGIN_DIR}" ]]; then
+    ok "Plugin files already in place (script runs from plugin dir)"
+else
+    cp -r "${SCRIPT_DIR}/plugin.yaml" "${SCRIPT_DIR}/__init__.py" "${PLUGIN_DIR}/" 2>/dev/null || {
+        err "Failed to copy plugin files. Make sure you're running install.sh from the repo root."
+        exit 1
+    }
+    ok "Plugin installed to ${PLUGIN_DIR}"
+fi
 
 # ---------------------------------------------------------------------------
 # Step 2: Install the hermes-cluster binary

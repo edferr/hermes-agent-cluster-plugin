@@ -72,12 +72,19 @@ def _download_binary() -> Optional[Path]:
     logger.info("Downloading %s from GitHub Releases...", asset_name)
 
     try:
-        # Get latest release info
         import urllib.request
+        import urllib.error
         import json
 
+        # Build headers — use GITHUB_TOKEN if available for higher rate limits
+        headers = {"User-Agent": "hermes-agent-cluster-plugin"}
+        github_token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+        if github_token:
+            headers["Authorization"] = f"token {github_token}"
+
+        # Get latest release info
         api_url = "https://api.github.com/repos/HughesCuit/hermes-agent-cluster/releases/latest"
-        req = urllib.request.Request(api_url, headers={"User-Agent": "hermes-agent-cluster-plugin"})
+        req = urllib.request.Request(api_url, headers=headers)
         with urllib.request.urlopen(req, timeout=10) as resp:
             release = json.loads(resp.read().decode())
 
@@ -96,7 +103,7 @@ def _download_binary() -> Optional[Path]:
         # Download
         logger.info("Downloading from %s...", download_url)
         with tempfile.NamedTemporaryFile(delete=False) as tmp:
-            req = urllib.request.Request(download_url, headers={"User-Agent": "hermes-agent-cluster-plugin"})
+            req = urllib.request.Request(download_url, headers=headers)
             with urllib.request.urlopen(req, timeout=120) as resp:
                 tmp.write(resp.read())
             tmp_path = tmp.name
@@ -108,6 +115,12 @@ def _download_binary() -> Optional[Path]:
         logger.info("Downloaded hermes-cluster to %s", target)
         return target
 
+    except urllib.error.HTTPError as e:
+        if e.code == 403:
+            logger.warning("GitHub API rate limit exceeded. Set GITHUB_TOKEN for higher limits.")
+        else:
+            logger.warning("Download failed: HTTP %s", e.code)
+        return None
     except Exception as e:
         logger.warning("Download failed: %s", e)
         return None
