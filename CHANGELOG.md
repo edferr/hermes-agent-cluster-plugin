@@ -243,3 +243,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Config Management API (GET/PUT /config, /config/validate, /config/yaml, /config/restart)
 - Dashboard Config page with full configuration management UI
 - Hot restart endpoint
+
+## [1.2.1] — 2026-05-15
+
+### Fixed
+- install.sh: skip copy step when script runs from plugin directory
+- Auto-download: support GITHUB_TOKEN/GH_TOKEN for higher API rate limits
+- Auto-download: graceful fallback with clear 403 rate limit message
