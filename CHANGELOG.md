@@ -3,6 +3,12 @@
 All notable changes to hermes-agent-cluster-plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.0.2] - 2026-05-14
+
+### Fixed
+- **Dashboard Config tab blank page**: ConfigPanel `useState` variable shadowing — `var state = state[0]` referenced itself due to JS hoisting. Fixed to `var state = _useState[0]`.
+- Root cause: React useState destructuring used same variable name as the useState result array.
+
 ---
 
 ## [2.0.0] — 2026-05-16
