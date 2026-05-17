@@ -58,7 +58,9 @@ def _ensure_state():
         _state = ClusterStore(db_path)
         logger.info("plugin_api: ClusterStore auto-initialized from %s", db_path)
     except Exception as e:
+        import traceback
         logger.warning("plugin_api: Failed to auto-init ClusterStore: %s", e)
+        logger.warning("plugin_api: Traceback: %s", traceback.format_exc())
         _state = None
     return _state
 
