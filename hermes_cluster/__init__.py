@@ -68,6 +68,7 @@ def _get_store() -> ClusterStore:
             return _store
 
         # Load configuration
+        global _config
         _config = _load_config()
 
         # Resolve DB path
@@ -122,6 +123,7 @@ def _load_config() -> Dict[str, Any]:
         "HERMES_CLUSTER_DB_DIR": ("db_dir", str),
         "HERMES_CLUSTER_HEARTBEAT_INTERVAL": ("heartbeat_interval", int),
         "HERMES_CLUSTER_LEASE_TTL": ("lease_ttl", int),
+        "HERMES_CLUSTER_MAIN_ENDPOINT": ("main_endpoint", str),
     }
 
     env_set_keys = set()
@@ -174,11 +176,30 @@ def _ensure_store() -> ClusterStore:
 def _heartbeat_loop():
     """Background thread that sends heartbeats periodically."""
     interval = _config.get("heartbeat_interval", DEFAULT_HEARTBEAT_INTERVAL)
+    main_endpoint = _config.get("main_endpoint", "").rstrip("/")
+    node_id = _config.get("node_id", DEFAULT_NODE_ID)
+    logger.info("heartbeat loop starting: endpoint=%s node=%s interval=%s config_keys=%s", main_endpoint, node_id, interval, list(_config.keys()))
     while not _heartbeat_stop.is_set():
         try:
             store = _get_store()
             if store:
                 store.update_heartbeat(store.node_id)
+            # Also send heartbeat to main cluster endpoint if configured
+            if main_endpoint:
+                try:
+                    from urllib.request import Request, urlopen
+                    from urllib.error import URLError
+                    url = f"{main_endpoint}/api/v1/nodes/heartbeat"
+                    payload = json.dumps({
+                        "node_id": node_id or store.node_id,
+                    }).encode()
+                    req = Request(url, data=payload, method="POST")
+                    req.add_header("Content-Type", "application/json")
+                    resp = urlopen(req, timeout=5)
+                    resp.read()
+                    logger.debug("heartbeat POST %s -> %s", node_id, url)
+                except Exception as e:
+                    logger.warning("heartbeat POST failed: %s -> %s: %s", node_id, main_endpoint, e)
         except Exception as e:
             logger.debug("Heartbeat error: %s", e)
         _heartbeat_stop.wait(timeout=interval)
@@ -194,7 +215,7 @@ def _start_heartbeat():
         target=_heartbeat_loop, daemon=True, name="cluster-heartbeat"
     )
     _heartbeat_thread.start()
-    logger.debug("Heartbeat thread started")
+    logger.info("worker heartbeat started: node=%s → %s (every %ds)", _config.get("node_id","?"), _config.get("main_endpoint","?"), _config.get("heartbeat_interval", 10))
 
 
 def _stop_heartbeat():
@@ -564,9 +585,34 @@ def _on_session_start(**kwargs) -> None:
     # Initialize store in background to avoid blocking session start
     def _init_in_background():
         try:
-            _get_store()
+            store = _get_store()
             _start_heartbeat()
             logger.info("Cluster initialized (Python/SQLite)")
+
+            # Auto-join main node if configured as worker
+            main_endpoint = config.get("main_endpoint", "").rstrip("/")
+            role = config.get("role", "main")
+            node_id = store.node_id
+            capabilities = config.get("capabilities", ["planning", "reviewing", "scheduling"])
+
+            if main_endpoint and role == "worker":
+                try:
+                    from urllib.request import Request, urlopen
+                    from urllib.error import URLError
+
+                    url = f"{main_endpoint}/api/v1/nodes/join"
+                    payload = json.dumps({
+                        "node_name": node_id,
+                        "capabilities": capabilities,
+                        "endpoint": f"local://{node_id}",
+                    }).encode()
+                    req = Request(url, data=payload, method="POST")
+                    req.add_header("Content-Type", "application/json")
+                    with urlopen(req, timeout=10) as resp:
+                        result = json.loads(resp.read().decode())
+                    logger.info("Auto-joined main cluster: %s", result)
+                except Exception as e:
+                    logger.warning("Auto-join failed (will retry on heartbeat): %s", e)
         except Exception as e:
             logger.warning("Cluster auto-init failed: %s", e)
 
@@ -667,6 +713,9 @@ def register(ctx) -> None:
     # Register lifecycle hooks
     ctx.register_hook("on_session_start", _on_session_start)
     ctx.register_hook("on_session_end", _on_session_end)
-    ctx.register_hook("on_gateway_startup", _on_gateway_startup)
 
     logger.info("hermes-agent-cluster plugin registered 7 cluster tools + lifecycle hooks (Python/SQLite)")
+
+    # Trigger background init at plugin load time (gateway startup).
+    # This runs auto-join for worker nodes without waiting for a hook.
+    _on_session_start()
